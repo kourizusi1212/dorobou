@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIGHT HEIST</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#0b1026;color:#eef;font:15px system-ui,"Hiragino Sans","Meiryo",sans-serif}
+canvas{display:block}
+.ov{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,7,18,.82);z-index:5}
+.ov.on{display:flex}
+.card{background:#141830;border:1px solid #2c3260;border-radius:12px;padding:22px;width:min(400px,92vw);display:grid;gap:10px}
+h1,h2,h3{margin:0}h1{color:#ffb703;letter-spacing:.12em;font-size:30px}
+input,button{font:inherit;padding:10px;border-radius:8px;border:1px solid #3a4180;background:#0d1124;color:#eef}
+input[type=range]{padding:0;width:100%}
+button{cursor:pointer;background:#252c66}button:hover:not(:disabled){background:#343d94}button:disabled{opacity:.4;cursor:default}
+.pri{background:#ffb703;color:#111;border:0;font-weight:700}.pri:hover:not(:disabled){background:#ffc83d}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.err{color:#ff7b7b;min-height:1.2em}small{color:#9ba3d0}
+#hud{position:fixed;inset:0;pointer-events:none;display:none;z-index:2;text-shadow:0 1px 3px #000}
+#hud.on{display:block}#hud>div{position:absolute}
+#tl{left:14px;top:12px}#tr{right:14px;top:12px;font-size:20px}#bl{left:14px;bottom:14px}
+#pc{left:50%;bottom:18%;transform:translateX(-50%);text-align:center;font-size:17px;white-space:nowrap}
+#bar{width:200px;height:8px;background:#0008;margin:6px auto;border-radius:4px;overflow:hidden}
+#bar i{display:block;height:100%;width:0;background:#ffb703}
+#cx{left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#fff;opacity:.8}
+#toast{position:fixed;left:50%;top:10%;transform:translateX(-50%);z-index:9;color:#ffd166;font-size:18px;text-shadow:0 1px 3px #000;pointer-events:none}
+.up{display:flex;justify-content:space-between;align-items:center;gap:10px}
+</style></head><body>
+
+<div id="title" class="ov on"><div class="card">
+  <h1>NIGHT HEIST</h1>
+  <div>夜の住宅街で家に忍び込み、お宝を車に積んで売ろう。最大5人で協力プレイ。</div>
+  <input id="name" placeholder="名前" maxlength="12">
+  <button class="pri" id="create">ルームを作る</button>
+  <div class="row"><input id="code" placeholder="ルームコード" maxlength="4" style="text-transform:uppercase"><button id="join">ルームに入る</button></div>
+  <div class="err" id="err"></div>
+  <small>WASD 移動 / Shift 走る / マウス 視点 / E 操作 / ESC メニュー</small>
+</div></div>
+
+<div id="hud"><div id="tl"></div><div id="tr"></div><div id="bl"></div><div id="cx"></div>
+  <div id="pc"><div id="prompt"></div><div id="bar"><i></i></div></div></div>
+<div id="toast"></div>
+
+<div id="menu" class="ov"><div class="card">
+  <h2>オプション</h2><div id="mc"></div>
+  <label>視野角 <b id="fovv"></b><input type="range" id="fov" min="60" max="110" step="1"></label>
+  <label>マウス感度 <b id="sensv"></b><input type="range" id="sens" min="0.2" max="3" step="0.1"></label>
+  <label>音量 <b id="volv"></b><input type="range" id="vol" min="0" max="1" step="0.05"></label>
+  <button class="pri" id="resume">再開</button>
+  <div class="row"><button id="save">セーブ</button><button id="load">ロード</button></div>
+  <button id="leave">部屋を抜ける</button>
+</div></div>
+
+<div id="shop" class="ov"><div class="card" id="shopc"></div></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';');
+const keys = new Set();
+let set = Object.assign({ fov: 75, sens: 1, vol: .6 }, JSON.parse(localStorage.getItem('nh_set') || '{}'));
+let state = 'title', ws, myId, CFG, code, ST = null, tg = null, hold = 0, built = false, sendT = 0;
+const P = { x: 0, z: 3, yaw: 0, pitch: 0 };
+const NAMES = [['置き時計','ゲーム機','ノートPC','財布'],['ギター','カメラ','ブランドバッグ','高級腕時計'],['絵画','毛皮のコート','宝石箱','高級ワイン'],['金の延べ棒','ダイヤの首飾り','古代の壺','札束の山']];
+const LC = [0x4fc3f7, 0xffd54f, 0xba68c8, 0xff7043], HC = [0x8d6e63, 0x78909c, 0x9e9e9e, 0xa1887f, 0x7e57c2, 0x546e7a];
+
+// ---------- 3D ----------
+const R = new THREE.WebGLRenderer({ antialias: true });
+R.setSize(innerWidth, innerHeight); R.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(R.domElement);
+const sc = new THREE.Scene(); sc.background = new THREE.Color(0x0b1026); sc.fog = new THREE.Fog(0x0b1026, 20, 90);
+const cam = new THREE.PerspectiveCamera(set.fov, innerWidth / innerHeight, .1, 200);
+sc.add(new THREE.HemisphereLight(0x8899ff, 0x223322, .9));
+const moon = new THREE.DirectionalLight(0xaabbff, .7); moon.position.set(-30, 50, 20); sc.add(moon);
+const M = (c, e = 0) => new THREE.MeshLambertMaterial({ color: c, emissive: e });
+const walls = [], doors = [], loots = [], targets = [], others = new Map();
+
+function box(x, y, z, w, h, d, c, solid = true) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(c)); m.position.set(x, y, z); sc.add(m);
+  if (solid) { m.a = { x1: x - w / 2, x2: x + w / 2, z1: z - d / 2, z2: z + d / 2 }; walls.push(m.a); }
+  return m;
+}
+function label(t, sz = 1) {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+  const x = c.getContext('2d'); x.font = 'bold 34px sans-serif'; x.textAlign = 'center'; x.lineWidth = 5; x.strokeStyle = '#000'; x.fillStyle = '#fff';
+  x.strokeText(t, 128, 44); x.fillText(t, 128, 44);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+  s.scale.set(4 * sz, sz, 1); s.renderOrder = 10; return s;
+}
+
+function build() {
+  if (built) return; built = true;
+  box(0, -.05, 0, 300, .1, 300, 0x1b3a2a, false); box(0, .01, 0, 300, .04, 9, 0x2a2a33, false);
+  for (let h = 0; h < 6; h++) {
+    const cx = [-26, 0, 26][h % 3], f = h < 3 ? 1 : -1, cz = -13 * f, W = 12, D = 9, H = 3.2, c = HC[h], lk = CFG.LOCK[h];
+    box(cx, H / 2, cz - f * D / 2, W, H, .4, c);
+    box(cx - W / 2, H / 2, cz, .4, H, D, c); box(cx + W / 2, H / 2, cz, .4, H, D, c);
+    box(cx - 3.5, H / 2, cz + f * D / 2, 5, H, .4, c); box(cx + 3.5, H / 2, cz + f * D / 2, 5, H, .4, c);
+    box(cx, H + .25, cz, W + 1, .5, D + 1, 0x3e2723, false); box(cx, .03, cz, W - .4, .06, D - .4, 0x4a3f35, false);
+    const dm = box(cx, H / 2, cz + f * D / 2, 2, H, .3, LC[lk]);
+    const lb = label('鍵Lv' + lk, .8); lb.position.set(0, .2, 0); dm.add(lb);
+    doors.push({ h, m: dm, a: dm.a });
+    const pl = new THREE.PointLight(0xffe2a8, .9, 16); pl.position.set(cx, 2.7, cz); sc.add(pl);
+    targets.push({ type: 'door', h, x: cx, z: cz + f * D / 2, r: 3, ok: () => !ST.openS.has(h),
+      txt: () => ST.up.pick >= lk ? `[E長押し] 鍵を開ける（鍵Lv${lk}）` : `鍵Lv${lk}が必要 — ピッキングを強化しよう` });
+    [[-4, -2], [4, -2], [-4, 1.8], [4, 1.8]].forEach(([lx, lz], k) => {
+      const x = cx + lx, z = cz + lz, i = h * 4 + k;
+      box(x, .4, z, 1.3, .8, 1.3, 0x5d4037);
+      const m = new THREE.Mesh(new THREE.BoxGeometry(.5, .4, .5), M(LC[lk], LC[lk])); m.position.set(x, 1, z); sc.add(m);
+      loots.push({ i, m });
+      targets.push({ type: 'loot', i, x, z, r: 2.6, ok: () => ST.openS.has(h) && !ST.takenS.has(i), txt: () => `[E] ${NAMES[lk][k]} $${CFG.VAL[lk][k]} を持つ` });
+    });
+  }
+  box(-8, 1, 0, 5, 1.8, 2.4, 0xf5f5f5); box(-5, .8, 0, 1.6, 1.4, 2.3, 0x2962ff);
+  const vl = label('🚐 車'); vl.position.set(-8, 3, 0); sc.add(vl);
+  box(8, 1.3, 0, 3, 2.6, 3, 0xc62828); box(8, 2.8, 0, 3.6, .3, 3.6, 0x7f0000, false);
+  const sl = label('💰 買取所'); sl.position.set(8, 4, 0); sc.add(sl);
+  targets.push({ type: 'van', x: -8, z: 0, r: 5, ok: () => mine().c > 0, txt: () => `[E] 車に積む（${mine().c}個 $${mine().cv}）` });
+  targets.push({ type: 'shop', x: 8, z: 0, r: 4.5, ok: () => true, txt: () => '[E] 買取所を開く' });
+}
+function mkOther(p) {
+  const g = new THREE.Group(), col = new THREE.Color().setHSL((p.id * .37) % 1, .6, .55).getHex();
+  const b = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.1, .4), M(col)); b.position.y = .75;
+  const h = new THREE.Mesh(new THREE.BoxGeometry(.4, .4, .4), M(0xffe0bd)); h.position.y = 1.5;
+  const n = new THREE.Mesh(new THREE.BoxGeometry(.12, .12, .12), M(0x222222)); n.position.set(0, 1.5, -.25);
+  const l = label(p.n, .7); l.position.y = 2.3; g.add(b, h, n, l); g.position.set(0, 0, 3); sc.add(g);
+  others.set(p.id, { g, tg: new THREE.Vector3(0, 0, 3), r: 0 });
+}
+function move(dx, dz) {
+  for (const ax of [0, 1]) {
+    const nx = P.x + (ax ? 0 : dx), nz = P.z + (ax ? dz : 0);
+    if (!walls.some(w => !w.off && nx > w.x1 - .35 && nx < w.x2 + .35 && nz > w.z1 - .35 && nz < w.z2 + .35)) { P.x = nx; P.z = nz; }
+  }
+}
+
+// ---------- 音 ----------
+let AC;
+function snd(f, d = .12, ty = 'sine', f2) {
+  if (!set.vol) return;
+  AC = AC || new (window.AudioContext || window.webkitAudioContext)();
+  const o = AC.createOscillator(), g = AC.createGain(), t = AC.currentTime;
+  o.type = ty; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.linearRampToValueAtTime(f2, t + d);
+  g.gain.setValueAtTime(.25 * set.vol, t); g.gain.exponentialRampToValueAtTime(.001, t + d);
+  o.connect(g).connect(AC.destination); o.start(); o.stop(t + d);
+}
+let tt; const toast = s => { const e = $('#toast'); e.textContent = s; clearTimeout(tt); tt = setTimeout(() => e.textContent = '', 2500); };
+
+// ---------- 設定 ----------
+function applySet() {
+  for (const k of ['fov', 'sens', 'vol']) { $('#' + k).value = set[k]; $('#' + k + 'v').textContent = set[k]; }
+  cam.fov = set.fov; cam.updateProjectionMatrix(); localStorage.setItem('nh_set', JSON.stringify(set));
+}
+['fov', 'sens', 'vol'].forEach(k => $('#' + k).oninput = e => { set[k] = +e.target.value; applySet(); });
+applySet();
+
+// ---------- 通信 ----------
+const send = o => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+const show = (s, on = true) => $(s).classList.toggle('on', on);
+const lock = () => { try { R.domElement.requestPointerLock(); } catch (e) {} };
+const mine = () => ST.ps.find(p => p.id === myId) || { c: 0, cv: 0 };
+function toTitle(msg = '') {
+  state = 'title'; ws = null; ST = null; document.exitPointerLock();
+  ['#menu', '#shop', '#hud'].forEach(s => show(s, false)); show('#title'); $('#err').textContent = msg;
+  others.forEach(o => sc.remove(o.g)); others.clear();
+}
+function go(m) {
+  if (ws) return;
+  m.name = $('#name').value.trim() || '泥棒'; localStorage.setItem('nh_name', m.name);
+  const w = ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+  w.onopen = () => w.send(JSON.stringify(m));
+  w.onmessage = e => onMsg(JSON.parse(e.data));
+  w.onclose = () => { if (ws === w) toTitle('接続が切れました'); };
+}
+function onMsg(m) {
+  switch (m.t) {
+    case 'err': { const w = ws; ws = null; w.close(); $('#err').textContent = m.msg; break; }
+    case 'joined': myId = m.id; CFG = m.cfg; code = m.code; build(); P.x = 0; P.z = 3; state = 'game'; show('#title', false); show('#hud'); lock(); break;
+    case 'st': ST = m; ST.openS = new Set(m.open); ST.takenS = new Set(m.taken); onState(); break;
+    case 'p': { const o = others.get(m.id); if (o) { o.tg.set(m.x, 0, m.z); o.r = m.r; } break; }
+    case 'left': { const o = others.get(m.id); if (o) { sc.remove(o.g); others.delete(m.id); } break; }
+    case 'ev':
+      if (m.k === 'take') snd(660, .1, 'square', 990);
+      if (m.k === 'load') { snd(200, .2, 'triangle', 120); toast('荷物を車に積んだ'); }
+      if (m.k === 'sell') { snd(1000, .1); setTimeout(() => snd(1500, .25), 90); toast('売却 +$' + m.v); }
+      if (m.k === 'buy') snd(500, .25, 'sawtooth', 900);
+      if (m.k === 'open') snd(150, .3, 'sawtooth', 60);
+      break;
+  }
+}
+function onState() {
+  doors.forEach(d => { const o = ST.openS.has(d.h); d.m.visible = !o; d.a.off = o; });
+  loots.forEach(l => l.m.visible = !ST.takenS.has(l.i));
+  const ids = new Set(ST.ps.map(p => p.id));
+  ST.ps.forEach(p => { if (p.id !== myId && !others.has(p.id)) mkOther(p); });
+  others.forEach((o, id) => { if (!ids.has(id)) { sc.remove(o.g); others.delete(id); } });
+  const me = mine();
+  $('#tl').innerHTML = `ルーム <b>${code}</b>（${ST.ps.length}/5）<br>` + ST.ps.map(p => esc(p.n) + (p.id === myId ? '（あなた）' : '')).join('<br>');
+  $('#tr').textContent = '💰 $' + ST.money;
+  $('#bl').innerHTML = `🎒 ${me.c}/${CFG.CAP[ST.up.bag]}（$${me.cv}）<br>🚐 車の荷物 ${ST.cargoN}個（$${ST.cargo}）`;
+  if (state === 'shop') renderShop();
+}
+
+// ---------- 買取所 ----------
+const UPN = { bag: ['バッグ', '持てる数'], pick: ['ピッキング', '開けられる鍵Lv'], boots: ['ブーツ', '移動速度'] };
+const val = (k, l) => k === 'bag' ? CFG.CAP[l] : k === 'pick' ? l : (5 + l * .9).toFixed(1);
+function renderShop() {
+  let h = `<h2>💰 買取所　$${ST.money}</h2><div>車の荷物: ${ST.cargoN}個（$${ST.cargo}）</div>
+    <button class="pri" data-a="sell" ${ST.cargo ? '' : 'disabled'}>全部売る</button><h3>アップグレード</h3>`;
+  for (const k in UPN) {
+    const lv = ST.up[k], cost = CFG.COST[k][lv];
+    h += `<div class="up"><div>${UPN[k][0]} Lv${lv}<br><small>${UPN[k][1]}: ${val(k, lv)}${cost === undefined ? '' : ' → ' + val(k, lv + 1)}</small></div>` +
+      (cost === undefined ? '<b>MAX</b>' : `<button data-a="buy" data-k="${k}" ${ST.money >= cost ? '' : 'disabled'}>$${cost}</button>`) + '</div>';
+  }
+  $('#shopc').innerHTML = h + `<button data-a="night">次の夜へ（家を補充・未売却の荷物は消える）</button><button data-a="close">閉じる</button>`;
+}
+$('#shopc').onclick = e => {
+  const b = e.target.closest('button'); if (!b) return; const a = b.dataset.a;
+  if (a === 'close') closeShop(); else if (a === 'buy') send({ t: 'buy', k: b.dataset.k }); else send({ t: a });
+};
+function openShop() { state = 'shop'; document.exitPointerLock(); show('#shop'); renderShop(); }
+function closeShop() { state = 'game'; show('#shop', false); lock(); }
+
+// ---------- メニュー ----------
+function resume() { if (state !== 'menu') return; state = 'game'; show('#menu', false); lock(); }
+$('#resume').onclick = resume;
+$('#save').onclick = () => { localStorage.setItem('nh_save', JSON.stringify({ money: ST.money, up: ST.up })); toast('セーブしました'); };
+$('#load').onclick = () => {
+  const s = localStorage.getItem('nh_save'); if (!s) return toast('セーブデータがありません');
+  send({ t: 'loadsave', s: JSON.parse(s) }); toast('ロードしました（新しい夜から再開）');
+};
+$('#leave').onclick = () => { const w = ws; ws = null; if (w) w.close(); toTitle(); };
+$('#name').value = localStorage.getItem('nh_name') || '';
+$('#create').onclick = () => go({ t: 'create' });
+$('#join').onclick = () => go({ t: 'join', code: $('#code').value });
+$('#code').onkeydown = e => { if (e.key === 'Enter') $('#join').click(); };
+
+// ---------- 入力 ----------
+document.addEventListener('pointerlockchange', () => {
+  if (!document.pointerLockElement && state === 'game') { state = 'menu'; $('#mc').textContent = 'ルームコード: ' + code; show('#menu'); }
+});
+R.domElement.addEventListener('click', () => { if (state === 'game' && !document.pointerLockElement) lock(); });
+addEventListener('mousemove', e => {
+  if (state !== 'game' || !document.pointerLockElement) return;
+  P.yaw -= e.movementX * .0022 * set.sens; P.pitch = Math.max(-1.4, Math.min(1.4, P.pitch - e.movementY * .0022 * set.sens));
+});
+addEventListener('keydown', e => {
+  if (e.code === 'Escape') { if (state === 'menu') resume(); else if (state === 'shop') closeShop(); return; }
+  if (e.repeat) return; keys.add(e.code);
+  if (e.code === 'KeyE' && state === 'game' && tg) {
+    if (tg.type === 'loot') send({ t: 'take', i: tg.i }); else if (tg.type === 'van') send({ t: 'load' }); else if (tg.type === 'shop') openShop();
+  }
+});
+addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('blur', () => keys.clear());
+addEventListener('resize', () => { R.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); });
+
+// ---------- メインループ ----------
+function update(dt) {
+  const k = keys, fw = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0), st = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
+  if (fw || st) {
+    const sp = (5 + ST.up.boots * .9) * (k.has('ShiftLeft') ? 1.6 : 1) * dt / Math.hypot(fw, st), s = Math.sin(P.yaw), c = Math.cos(P.yaw);
+    move((-s * fw + c * st) * sp, (-c * fw - s * st) * sp);
+  }
+  tg = null; let best = 99;
+  for (const o of targets) {
+    if (!o.ok()) continue; const d = Math.hypot(P.x - o.x, P.z - o.z);
+    if (d < o.r && d < best) { best = d; tg = o; }
+  }
+  $('#prompt').textContent = document.pointerLockElement ? (tg ? tg.txt() : '') : 'クリックして操作開始';
+  const bar = $('#bar i');
+  if (tg && tg.type === 'door' && k.has('KeyE') && ST.up.pick >= CFG.LOCK[tg.h]) {
+    hold += dt; const need = 3 - ST.up.pick * .5; bar.style.width = Math.min(100, hold / need * 100) + '%';
+    if (hold >= need) { send({ t: 'open', h: tg.h }); hold = 0; }
+  } else { hold = 0; bar.style.width = '0'; }
+}
+let last = performance.now();
+(function loop(t) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(.05, (t - last) / 1000); last = t;
+  if (ST) {
+    if (state === 'game') update(dt);
+    sendT += dt; if (sendT > .08) { sendT = 0; send({ t: 'p', x: +P.x.toFixed(2), z: +P.z.toFixed(2), r: +P.yaw.toFixed(2) }); }
+    others.forEach(o => { o.g.position.lerp(o.tg, Math.min(1, dt * 12)); o.g.rotation.y = o.r; });
+  }
+  loots.forEach(l => l.m.rotation.y += dt);
+  cam.position.set(P.x, 1.7, P.z); cam.rotation.set(P.pitch, P.yaw, 0, 'YXZ');
+  R.render(sc, cam);
+})(performance.now());
+</script></body></html>

@@ -1,0 +1,9 @@
+{
+  "name": "night-heist",
+  "version": "1.0.0",
+  "description": "最大5人の協力型3D泥棒ゲーム",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": { "express": "^4.19.2", "ws": "^8.17.0" }
+}
