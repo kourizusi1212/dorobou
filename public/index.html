@@ -25,19 +25,25 @@ button{cursor:pointer;background:#252c66}button:hover:not(:disabled){background:
 #cx{left:50%;top:50%;width:6px;height:6px;margin:-3px;border-radius:50%;background:#fff;opacity:.8}
 #toast{position:fixed;left:50%;top:10%;transform:translateX(-50%);z-index:9;color:#ffd166;font-size:18px;text-shadow:0 1px 3px #000;pointer-events:none}
 .up{display:flex;justify-content:space-between;align-items:center;gap:10px}
+#pick{background:rgba(5,7,18,.5)}#pcv{margin:0 auto;display:block}
+#vig{position:fixed;inset:0;pointer-events:none;z-index:3;box-shadow:inset 0 0 150px 50px rgba(255,20,20,.85);opacity:0}
+#fl{position:fixed;inset:0;background:#000;pointer-events:none;z-index:8;opacity:0;transition:opacity .35s}
+#hint{left:50%;top:12px;transform:translateX(-50%);text-align:center;font-size:16px}
+#hint i{display:block;width:220px;height:6px;margin:5px auto;background:#0008;border-radius:3px;overflow:hidden}
+#hint b{display:block;height:100%;background:#5dff8a;transition:width .4s}
 </style></head><body>
 
 <div id="title" class="ov on"><div class="card">
   <h1>NIGHT HEIST</h1>
-  <div>夜の住宅街で家に忍び込み、お宝を車に積んで売ろう。最大5人で協力プレイ。</div>
+  <div>警備員の目をかいくぐり、みんなで大豪邸のお宝を盗み出せ。最大5人で協力プレイ。</div>
   <input id="name" placeholder="名前" maxlength="12">
   <button class="pri" id="create">ルームを作る</button>
   <div class="row"><input id="code" placeholder="ルームコード" maxlength="4" style="text-transform:uppercase"><button id="join">ルームに入る</button></div>
   <div class="err" id="err"></div>
-  <small>WASD 移動 / Shift 走る / マウス 視点 / E 操作 / ESC メニュー</small>
+  <small>WASD 移動 / Shift 走る / C しゃがむ / マウス 視点 / E 操作 / ESC メニュー</small>
 </div></div>
 
-<div id="hud"><div id="tl"></div><div id="tr"></div><div id="bl"></div><div id="cx"></div>
+<div id="hud"><div id="hint"></div><div id="tl"></div><div id="tr"></div><div id="bl"></div><div id="cx"></div>
   <div id="pc"><div id="prompt"></div><div id="bar"><i></i></div></div></div>
 <div id="toast"></div>
 
@@ -53,6 +59,9 @@ button{cursor:pointer;background:#252c66}button:hover:not(:disabled){background:
 
 <div id="shop" class="ov"><div class="card" id="shopc"></div></div>
 
+<div id="vig"></div><div id="fl"></div>
+<div id="pick" class="ov"><div class="card" style="text-align:center"><h3 id="pt"></h3><canvas id="pcv" width="280" height="280"></canvas><div id="pi"></div>
+<small>Space かクリックで、針が緑に入った瞬間にピンを止める（ミス3回で失敗・ESCで中断）</small></div></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 const $ = s => document.querySelector(s);
@@ -88,43 +97,68 @@ function label(t, sz = 1) {
   s.scale.set(4 * sz, sz, 1); s.renderOrder = 10; return s;
 }
 
+const RN = ['玄関ホール', '図書室', '寝室', 'ギャラリー', '金庫室', '書斎'], RC = [0x4fc3f7, 0xffd54f, 0xffd54f, 0xba68c8, 0xff7043, 0xba68c8], H = 3.4;
+const RUG = [0x6d2e2e, 0x2e4a6d, 0x4a2e6d, 0x2e6d4a, 0x6d5a2e, 0x5a2e4a];
+const OFF = [[-4.5, -4.5], [-4.5, 0], [-4.5, 4.5], [4.5, -4.5], [4.5, 0], [4.5, 4.5]];
+const GEO = [() => new THREE.BoxGeometry(.5, .4, .5), () => new THREE.CylinderGeometry(.18, .25, .55, 10), () => new THREE.SphereGeometry(.28, 12, 10),
+  () => new THREE.OctahedronGeometry(.32), () => new THREE.TorusGeometry(.22, .08, 8, 16), () => new THREE.ConeGeometry(.25, .55, 10)];
+const gs = [], gm = [];
 function build() {
   if (built) return; built = true;
-  box(0, -.05, 0, 300, .1, 300, 0x1b3a2a, false); box(0, .01, 0, 300, .04, 9, 0x2a2a33, false);
-  for (let h = 0; h < 6; h++) {
-    const cx = [-26, 0, 26][h % 3], f = h < 3 ? 1 : -1, cz = -13 * f, W = 12, D = 9, H = 3.2, c = HC[h], lk = CFG.LOCK[h];
-    box(cx, H / 2, cz - f * D / 2, W, H, .4, c);
-    box(cx - W / 2, H / 2, cz, .4, H, D, c); box(cx + W / 2, H / 2, cz, .4, H, D, c);
-    box(cx - 3.5, H / 2, cz + f * D / 2, 5, H, .4, c); box(cx + 3.5, H / 2, cz + f * D / 2, 5, H, .4, c);
-    box(cx, H + .25, cz, W + 1, .5, D + 1, 0x3e2723, false); box(cx, .03, cz, W - .4, .06, D - .4, 0x4a3f35, false);
-    const dm = box(cx, H / 2, cz + f * D / 2, 2, H, .3, LC[lk]);
-    const lb = label('鍵Lv' + lk, .8); lb.position.set(0, .2, 0); dm.add(lb);
-    doors.push({ h, m: dm, a: dm.a });
-    const pl = new THREE.PointLight(0xffe2a8, .9, 16); pl.position.set(cx, 2.7, cz); sc.add(pl);
-    targets.push({ type: 'door', h, x: cx, z: cz + f * D / 2, r: 3, ok: () => !ST.openS.has(h),
-      txt: () => ST.up.pick >= lk ? `[E長押し] 鍵を開ける（鍵Lv${lk}）` : `鍵Lv${lk}が必要 — ピッキングを強化しよう` });
-    [[-4, -2], [4, -2], [-4, 1.8], [4, 1.8]].forEach(([lx, lz], k) => {
-      const x = cx + lx, z = cz + lz, i = h * 4 + k;
+  box(0, -.05, 0, 300, .1, 300, 0x1b3a2a, false); box(0, .02, 26, 300, .04, 8, 0x2a2a33, false); box(0, .03, 0, 40, .06, 28, 0x4a3f35, false);
+  CFG.WALLS.forEach(r => box((r[0] + r[2]) / 2, H / 2, (r[1] + r[3]) / 2, r[2] - r[0], H, r[3] - r[1], 0x7d6b5d));
+  box(0, H + .3, 0, 41, .5, 29, 0x3e2723, false);
+  CFG.DOORS.forEach((r, h) => {                               // 開閉アニメ付きドア（蝶番を軸に回転）
+    const ax = r[2] - r[0] > r[3] - r[1], len = ax ? r[2] - r[0] : r[3] - r[1], cx = (r[0] + r[2]) / 2, cz = (r[1] + r[3]) / 2, lk = r[4];
+    const pv = new THREE.Group(); pv.position.set(ax ? r[0] : cx, 0, ax ? cz : r[1]); sc.add(pv);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(ax ? len : .25, H, ax ? .25 : len), M(LC[lk])); m.position.set(ax ? len / 2 : 0, H / 2, ax ? 0 : len / 2); pv.add(m);
+    const lb = label('鍵Lv' + lk, .8); lb.position.copy(m.position); pv.add(lb);
+    const a = { x1: r[0], x2: r[2], z1: r[1], z2: r[3] }; walls.push(a);
+    doors.push({ h, pv, lb, a, ax, t: 0, o: false, cx, cz });
+    targets.push({ type: 'door', h, x: cx, z: cz, r: 2.6, ok: () => !ST.openS.has(h),
+      txt: () => ST.up.pick >= lk ? `[E] 鍵開けに挑戦（鍵Lv${lk}）` : `鍵Lv${lk}が必要 — ピッキングを強化しよう` });
+  });
+  CFG.RM.forEach(([cx, cz], i) => {
+    box(cx, .08, cz, 9.5, .04, 10, RUG[i], false);
+    const pl = new THREE.PointLight(0xffe2a8, .9, 15); pl.position.set(cx, 3, cz); sc.add(pl);
+    const rl = label(RN[i], .9); rl.position.set(cx, 3.1, cz); sc.add(rl);
+    OFF.forEach(([ox, oz], k) => {
+      const x = cx + ox, z = cz + oz, id = i * 6 + k;
       box(x, .4, z, 1.3, .8, 1.3, 0x5d4037);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(.5, .4, .5), M(LC[lk], LC[lk])); m.position.set(x, 1, z); sc.add(m);
-      loots.push({ i, m });
-      targets.push({ type: 'loot', i, x, z, r: 2.6, ok: () => ST.openS.has(h) && !ST.takenS.has(i), txt: () => `[E] ${NAMES[lk][k]} $${CFG.VAL[lk][k]} を持つ` });
+      const m = new THREE.Mesh(GEO[k](), M(RC[i], RC[i])); m.position.set(x, 1.1, z); sc.add(m);
+      loots.push({ i: id, m, y: 1.1, s: 1, tk: false });
+      targets.push({ type: 'loot', i: id, x, z, r: 2.6, ok: () => ST.openS.has(i) && !ST.takenS.has(id), txt: () => `[E] ${CFG.NAMES[i][k]} $${CFG.VAL[i][k]} を盗む` });
     });
+  });
+  const [vx, vz] = CFG.VAN, [sx, sz] = CFG.SHOP;
+  box(vx, 1, vz, 5, 1.8, 2.4, 0xf5f5f5); box(vx + 3, .8, vz, 1.6, 1.4, 2.3, 0x2962ff);
+  const vl = label('🚐 車'); vl.position.set(vx, 3, vz); sc.add(vl);
+  box(sx, 1.3, sz, 3, 2.6, 3, 0xc62828); box(sx, 2.8, sz, 3.6, .3, 3.6, 0x7f0000, false);
+  const sl = label('💰 買取所'); sl.position.set(sx, 4, sz); sc.add(sl);
+  targets.push({ type: 'van', x: vx, z: vz, r: 5, ok: () => mine().c > 0, txt: () => `[E] 車に積む（${mine().c}個 $${mine().cv}）` });
+  targets.push({ type: 'shop', x: sx, z: sz, r: 4.5, ok: () => true, txt: () => '[E] 買取所を開く' });
+}
+// 手足が動く人型（プレイヤー・警備員共通）
+function man(col, guard) {
+  const g = new THREE.Group(); g.L = []; g.A = [];
+  const part = (w, h, d, c, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), M(c)); m.position.set(x, y, z); return m; };
+  g.add(part(.6, .7, .35, col, 0, 1.15, 0), part(.38, .38, .38, 0xffe0bd, 0, 1.7, 0), part(.1, .1, .1, 0x333333, 0, 1.7, -.22));
+  if (guard) g.add(part(.46, .14, .46, 0x111122, 0, 1.95, 0));
+  for (const s of [-1, 1]) {
+    const l = new THREE.Group(), a = new THREE.Group(); l.position.set(s * .16, .8, 0); a.position.set(s * .42, 1.45, 0);
+    l.add(part(.22, .8, .25, 0x222233, 0, -.4, 0)); a.add(part(.18, .65, .2, col, 0, -.3, 0)); g.add(l, a); g.L.push(l); g.A.push(a);
   }
-  box(-8, 1, 0, 5, 1.8, 2.4, 0xf5f5f5); box(-5, .8, 0, 1.6, 1.4, 2.3, 0x2962ff);
-  const vl = label('🚐 車'); vl.position.set(-8, 3, 0); sc.add(vl);
-  box(8, 1.3, 0, 3, 2.6, 3, 0xc62828); box(8, 2.8, 0, 3.6, .3, 3.6, 0x7f0000, false);
-  const sl = label('💰 買取所'); sl.position.set(8, 4, 0); sc.add(sl);
-  targets.push({ type: 'van', x: -8, z: 0, r: 5, ok: () => mine().c > 0, txt: () => `[E] 車に積む（${mine().c}個 $${mine().cv}）` });
-  targets.push({ type: 'shop', x: 8, z: 0, r: 4.5, ok: () => true, txt: () => '[E] 買取所を開く' });
+  return g;
 }
 function mkOther(p) {
-  const g = new THREE.Group(), col = new THREE.Color().setHSL((p.id * .37) % 1, .6, .55).getHex();
-  const b = new THREE.Mesh(new THREE.BoxGeometry(.6, 1.1, .4), M(col)); b.position.y = .75;
-  const h = new THREE.Mesh(new THREE.BoxGeometry(.4, .4, .4), M(0xffe0bd)); h.position.y = 1.5;
-  const n = new THREE.Mesh(new THREE.BoxGeometry(.12, .12, .12), M(0x222222)); n.position.set(0, 1.5, -.25);
-  const l = label(p.n, .7); l.position.y = 2.3; g.add(b, h, n, l); g.position.set(0, 0, 3); sc.add(g);
-  others.set(p.id, { g, tg: new THREE.Vector3(0, 0, 3), r: 0 });
+  const g = man(new THREE.Color().setHSL((p.id * .37) % 1, .6, .55).getHex()), l = label(p.n, .7); l.position.y = 2.4; g.add(l);
+  g.position.set(CFG.SP[0], 0, CFG.SP[1]); sc.add(g); others.set(p.id, { g, tg: g.position.clone(), r: 0, ph: 0, cr: 0 });
+}
+function mkGuard() {                                          // 懐中電灯の光（円錐）と「？」「！」マーク付き
+  const g = man(0x1a237e, true), c = new THREE.Mesh(new THREE.ConeGeometry(2.8, 9, 16, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2a0, transparent: true, opacity: .2, depthWrite: false, side: THREE.DoubleSide }));
+  c.rotation.x = Math.PI / 2; c.position.set(0, 1.5, -4.5); g.add(c); g.cone = c;
+  const q = label('❓', .9), e = label('❗', 1.1); q.position.y = e.position.y = 2.7; g.add(q, e); g.q = q; g.e = e; sc.add(g); return g;
 }
 function move(dx, dz) {
   for (const ax of [0, 1]) {
@@ -161,7 +195,7 @@ const mine = () => ST.ps.find(p => p.id === myId) || { c: 0, cv: 0 };
 function toTitle(msg = '') {
   state = 'title'; ws = null; ST = null; document.exitPointerLock();
   ['#menu', '#shop', '#hud'].forEach(s => show(s, false)); show('#title'); $('#err').textContent = msg;
-  others.forEach(o => sc.remove(o.g)); others.clear();
+  others.forEach(o => sc.remove(o.g)); others.clear(); endPick(); gs.length = 0; $('#vig').style.opacity = 0;
 }
 function go(m) {
   if (ws) return;
@@ -174,22 +208,25 @@ function go(m) {
 function onMsg(m) {
   switch (m.t) {
     case 'err': { const w = ws; ws = null; w.close(); $('#err').textContent = m.msg; break; }
-    case 'joined': myId = m.id; CFG = m.cfg; code = m.code; build(); P.x = 0; P.z = 3; state = 'game'; show('#title', false); show('#hud'); lock(); break;
+    case 'joined': myId = m.id; CFG = m.cfg; code = m.code; build(); P.x = CFG.SP[0]; P.z = CFG.SP[1]; state = 'game'; show('#title', false); show('#hud'); lock(); break;
     case 'st': ST = m; ST.openS = new Set(m.open); ST.takenS = new Set(m.taken); onState(); break;
-    case 'p': { const o = others.get(m.id); if (o) { o.tg.set(m.x, 0, m.z); o.r = m.r; } break; }
+    case 'p': { const o = others.get(m.id); if (o) { o.tg.set(m.x, 0, m.z); o.r = m.r; o.cr = m.c; } break; }
+    case 'g': gs.length = 0; m.g.forEach(a => gs.push(a)); break;
+    case 'caught': P.x = CFG.SP[0]; P.z = CFG.SP[1]; shake = 1; endPick(); snd(90, .6, 'sawtooth', 40); toast('捕まった！ 持っていたお宝を落とした');
+      $('#fl').style.opacity = 1; setTimeout(() => $('#fl').style.opacity = 0, 700); break;
     case 'left': { const o = others.get(m.id); if (o) { sc.remove(o.g); others.delete(m.id); } break; }
     case 'ev':
       if (m.k === 'take') snd(660, .1, 'square', 990);
-      if (m.k === 'load') { snd(200, .2, 'triangle', 120); toast('荷物を車に積んだ'); }
-      if (m.k === 'sell') { snd(1000, .1); setTimeout(() => snd(1500, .25), 90); toast('売却 +$' + m.v); }
+      if (m.k === 'load') { snd(200, .2, 'triangle', 120); toast('荷物を車に積んだ'); burst(CFG.VAN[0], 2, CFG.VAN[1], 0xffffff, 16); }
+      if (m.k === 'sell') { snd(1000, .1); setTimeout(() => snd(1500, .25), 90); toast('売却 +$' + m.v); burst(CFG.SHOP[0], 3, CFG.SHOP[1], 0xffd54f, 40); }
       if (m.k === 'buy') snd(500, .25, 'sawtooth', 900);
-      if (m.k === 'open') snd(150, .3, 'sawtooth', 60);
+      if (m.k === 'open') snd(150, .3, 'sawtooth', 60); burst(P.x, 1.2, P.z, 0x5dff8a, 20);
       break;
   }
 }
 function onState() {
-  doors.forEach(d => { const o = ST.openS.has(d.h); d.m.visible = !o; d.a.off = o; });
-  loots.forEach(l => l.m.visible = !ST.takenS.has(l.i));
+  doors.forEach(d => { d.o = ST.openS.has(d.h); d.a.off = d.o; });
+  loots.forEach(l => l.tk = ST.takenS.has(l.i));
   const ids = new Set(ST.ps.map(p => p.id));
   ST.ps.forEach(p => { if (p.id !== myId && !others.has(p.id)) mkOther(p); });
   others.forEach((o, id) => { if (!ids.has(id)) { sc.remove(o.g); others.delete(id); } });
@@ -236,7 +273,7 @@ $('#code').onkeydown = e => { if (e.key === 'Enter') $('#join').click(); };
 
 // ---------- 入力 ----------
 document.addEventListener('pointerlockchange', () => {
-  if (!document.pointerLockElement && state === 'game') { state = 'menu'; $('#mc').textContent = 'ルームコード: ' + code; show('#menu'); }
+  if (!document.pointerLockElement && (state === 'game' || state === 'pick')) { endPick(); state = 'menu'; $('#mc').textContent = 'ルームコード: ' + code; show('#menu'); }
 });
 R.domElement.addEventListener('click', () => { if (state === 'game' && !document.pointerLockElement) lock(); });
 addEventListener('mousemove', e => {
@@ -244,46 +281,121 @@ addEventListener('mousemove', e => {
   P.yaw -= e.movementX * .0022 * set.sens; P.pitch = Math.max(-1.4, Math.min(1.4, P.pitch - e.movementY * .0022 * set.sens));
 });
 addEventListener('keydown', e => {
-  if (e.code === 'Escape') { if (state === 'menu') resume(); else if (state === 'shop') closeShop(); return; }
-  if (e.repeat) return; keys.add(e.code);
+  if (e.code === 'Escape') { if (state === 'menu') resume(); else if (state === 'shop') closeShop(); else if (state === 'pick') endPick(); return; }
+  if (state === 'pick') { if (e.code === 'Space') { e.preventDefault(); pickHit(); } return; } if (e.repeat) return; keys.add(e.code);
   if (e.code === 'KeyE' && state === 'game' && tg) {
-    if (tg.type === 'loot') send({ t: 'take', i: tg.i }); else if (tg.type === 'van') send({ t: 'load' }); else if (tg.type === 'shop') openShop();
+    if (tg.type === 'door') startPick(tg.h); else if (tg.type === 'loot') send({ t: 'take', i: tg.i }); else if (tg.type === 'van') send({ t: 'load' }); else if (tg.type === 'shop') openShop();
   }
 });
-addEventListener('keyup', e => keys.delete(e.code));
+addEventListener('keyup', e => keys.delete(e.code)); addEventListener('mousedown', () => pickHit());
 addEventListener('blur', () => keys.clear());
 addEventListener('resize', () => { R.setSize(innerWidth, innerHeight); cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); });
 
 // ---------- メインループ ----------
+// ---------- 鍵開けミニゲーム ----------
+let pk = null, shake = 0, bob = 0, vel = 0, lastHint = '';
+const ease = t => t * t * (3 - 2 * t), ang = a => Math.atan2(Math.sin(a), Math.cos(a)), pts = [];
+function burst(x, y, z, c, n = 12) {
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(.1, .1, .1), new THREE.MeshBasicMaterial({ color: c })); m.position.set(x, y, z); sc.add(m);
+    pts.push({ m, v: new THREE.Vector3((Math.random() - .5) * 4, Math.random() * 4 + 1, (Math.random() - .5) * 4), l: 1 });
+  }
+}
+function startPick(h) {
+  const lk = CFG.DOORS[h][4], e = ST.up.pick - lk;
+  if (e < 0) return toast('ピッキングが足りない');
+  pk = { h, n: 2 + lk, done: 0, miss: 0, a: 0, dir: 1, sp: 2.8 - .25 * e, w: .8 + .12 * e, z: Math.random() * 6.28 };
+  state = 'pick'; show('#pick'); $('#pt').textContent = `🔓 鍵Lv${lk}を開錠中…`;
+}
+function endPick() { if (!pk) return; pk = null; state = 'game'; show('#pick', false); }
+function pickHit() {
+  if (!pk) return;
+  const d = ((pk.a - pk.z) % 6.2832 + 6.2832) % 6.2832;
+  if (d < pk.w) {
+    snd(700 + pk.done * 160, .12, 'square'); burst(P.x, 1.3, P.z, 0x5dff8a, 6);
+    if (++pk.done >= pk.n) { send({ t: 'open', h: pk.h }); endPick(); } else { pk.z = Math.random() * 6.28; pk.dir = -pk.dir; }
+  } else {
+    snd(120, .25, 'sawtooth'); shake = .3;
+    if (++pk.miss >= 3) { toast('ピックが折れた！ 物音で警備員が来る'); send({ t: 'noise', h: pk.h }); endPick(); }
+  }
+}
+function drawPick() {
+  const c = $('#pcv').getContext('2d'); c.setTransform(1, 0, 0, 1, 140, 140); c.clearRect(-140, -140, 280, 280); c.lineCap = 'round';
+  c.lineWidth = 18; c.strokeStyle = '#2a3170'; c.beginPath(); c.arc(0, 0, 100, 0, 7); c.stroke();
+  c.strokeStyle = '#5dff8a'; c.beginPath(); c.arc(0, 0, 100, pk.z, pk.z + pk.w); c.stroke();
+  c.strokeStyle = '#ffb703'; c.lineWidth = 6; c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(pk.a) * 112, Math.sin(pk.a) * 112); c.stroke();
+  for (let i = 0; i < pk.n; i++) { c.fillStyle = i < pk.done ? '#5dff8a' : '#555'; c.fillRect(-pk.n * 14 + i * 28 + 3, i < pk.done ? -22 : -8, 22, 30); }
+  $('#pi').textContent = 'ミス ' + '✖'.repeat(pk.miss) + '・'.repeat(3 - pk.miss);
+}
+function hintText() {
+  const mi = mine(), cap = CFG.CAP[ST.up.bag], t = ST.taken.length, n = CFG.NAMES.length * 6;
+  const s = !ST.openS.has(0) ? '玄関の鍵を開けよう（警備員の巡回に注意）' : mi.c >= cap ? 'バッグがいっぱい → 車に積もう' : mi.c > 0 ? 'お宝を車へ運ぼう'
+    : ST.cargoN > 0 ? '車の荷物を買取所で売ろう' : 'お宝を探そう（Cでしゃがむと見つかりにくい）';
+  return `${s}<i><b style="width:${t / n * 100}%"></b></i>盗んだ ${t}/${n}`;
+}
+
+// ---------- 更新 ----------
 function update(dt) {
-  const k = keys, fw = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0), st = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
+  const k = keys, cr = k.has('KeyC') || k.has('ControlLeft'), run = k.has('ShiftLeft') && !cr;
+  const fw = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0), st = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
+  P.cr = cr; vel = 0;
   if (fw || st) {
-    const sp = (5 + ST.up.boots * .9) * (k.has('ShiftLeft') ? 1.6 : 1) * dt / Math.hypot(fw, st), s = Math.sin(P.yaw), c = Math.cos(P.yaw);
+    vel = (5 + ST.up.boots * .9) * (run ? 1.6 : cr ? .45 : 1);
+    const sp = vel * dt / Math.hypot(fw, st), s = Math.sin(P.yaw), c = Math.cos(P.yaw);
     move((-s * fw + c * st) * sp, (-c * fw - s * st) * sp);
   }
   tg = null; let best = 99;
-  for (const o of targets) {
-    if (!o.ok()) continue; const d = Math.hypot(P.x - o.x, P.z - o.z);
-    if (d < o.r && d < best) { best = d; tg = o; }
-  }
+  for (const o of targets) { if (!o.ok()) continue; const d = Math.hypot(P.x - o.x, P.z - o.z); if (d < o.r && d < best) { best = d; tg = o; } }
   $('#prompt').textContent = document.pointerLockElement ? (tg ? tg.txt() : '') : 'クリックして操作開始';
-  const bar = $('#bar i');
-  if (tg && tg.type === 'door' && k.has('KeyE') && ST.up.pick >= CFG.LOCK[tg.h]) {
-    hold += dt; const need = 3 - ST.up.pick * .5; bar.style.width = Math.min(100, hold / need * 100) + '%';
-    if (hold >= need) { send({ t: 'open', h: tg.h }); hold = 0; }
-  } else { hold = 0; bar.style.width = '0'; }
 }
+const swing = (g, ph, a) => { g.L[0].rotation.x = Math.sin(ph) * a; g.L[1].rotation.x = -Math.sin(ph) * a; g.A[0].rotation.x = -Math.sin(ph) * a; g.A[1].rotation.x = Math.sin(ph) * a; };
 let last = performance.now();
 (function loop(t) {
   requestAnimationFrame(loop);
-  const dt = Math.min(.05, (t - last) / 1000); last = t;
+  const dt = Math.min(.05, (t - last) / 1000), T = t / 1000, f = Math.min(1, dt * 10); last = t;
   if (ST) {
-    if (state === 'game') update(dt);
-    sendT += dt; if (sendT > .08) { sendT = 0; send({ t: 'p', x: +P.x.toFixed(2), z: +P.z.toFixed(2), r: +P.yaw.toFixed(2) }); }
-    others.forEach(o => { o.g.position.lerp(o.tg, Math.min(1, dt * 12)); o.g.rotation.y = o.r; });
+    if (state === 'game') update(dt); else vel = 0;
+    if (pk) { pk.a += pk.dir * pk.sp * dt; drawPick(); }
+    sendT += dt; if (sendT > .08) { sendT = 0; send({ t: 'p', x: +P.x.toFixed(2), z: +P.z.toFixed(2), r: +P.yaw.toFixed(2), c: P.cr ? 1 : 0 }); }
+    const h = hintText(); if (h !== lastHint) { lastHint = h; $('#hint').innerHTML = h; }
+    others.forEach(o => {                                       // 他プレイヤー：補間＋歩行アニメ＋しゃがみ
+      const p0 = o.g.position.clone(); o.g.position.lerp(o.tg, f * 1.2); o.g.rotation.y = o.r;
+      const v = p0.distanceTo(o.g.position) / dt; o.ph += v * dt * 1.3; swing(o.g, o.ph, Math.min(1, v / 4) * .9);
+      o.g.scale.y += ((o.cr ? .75 : 1) - o.g.scale.y) * .2;
+    });
+    let al = 0;
+    gs.forEach((a, i) => {                                      // 警備員：巡回・調査・追跡
+      const g = gm[i] || (gm[i] = mkGuard()); if (!g.init) { g.init = 1; g.position.set(a[0], 0, a[1]); }
+      const p0 = g.position.clone(); g.position.x += (a[0] - g.position.x) * f; g.position.z += (a[1] - g.position.z) * f;
+      g.rotation.y += ang(a[2] - g.rotation.y) * f * .8;
+      const v = p0.distanceTo(g.position) / dt; g.ph = (g.ph || 0) + v * dt * 1.4; swing(g, g.ph, Math.min(1, v / 2.5) * .8);
+      g.cone.material.color.setHex(a[3] === 2 ? 0xff3030 : a[3] === 1 ? 0xffb040 : 0xfff2a0);
+      g.q.visible = a[3] === 1 || (a[3] === 0 && a[4] > .05); g.e.visible = a[3] === 2;
+      const pu = 1 + Math.sin(T * 14) * .1; g.e.scale.set(4.4 * pu, 1.1 * pu, 1);
+      al = Math.max(al, a[3] === 2 ? 1 : a[4] * .8);
+    });
+    $('#vig').style.opacity = al;
+    doors.forEach(d => {                                        // ドアが開く（警備員が近づいても開く）
+      const near = gs.some(a => Math.hypot(a[0] - d.cx, a[1] - d.cz) < 2.2);
+      d.t += ((d.o || near ? 1 : 0) - d.t) * Math.min(1, dt * 6);
+      d.pv.rotation.y = (d.ax ? -1 : 1) * Math.PI / 2 * ease(Math.min(1, Math.max(0, d.t))); d.lb.visible = !d.o;
+    });
+    loots.forEach((l, i) => {                                   // お宝：回転・浮遊・取ると縮んで消える／夜が明けると復活
+      if (l.was !== undefined && l.tk && !l.was) burst(l.m.position.x, 1.2, l.m.position.z, 0xffd54f, 8);
+      l.was = l.tk; l.s += ((l.tk ? 0 : 1) - l.s) * f * 1.2;
+      l.m.visible = l.s > .03; l.m.scale.setScalar(Math.max(l.s, .001));
+      l.m.rotation.y += dt * 1.5; l.m.position.y = l.y + Math.sin(T * 2 + i) * .06;
+    });
+    for (let i = pts.length - 1; i >= 0; i--) {
+      const p = pts[i]; p.v.y -= 9 * dt; p.m.position.addScaledVector(p.v, dt); p.l -= dt * 1.3; p.m.scale.setScalar(Math.max(p.l, .01));
+      if (p.l <= 0) { sc.remove(p.m); pts.splice(i, 1); }
+    }
   }
-  loots.forEach(l => l.m.rotation.y += dt);
-  cam.position.set(P.x, 1.7, P.z); cam.rotation.set(P.pitch, P.yaw, 0, 'YXZ');
+  P.h = (P.h || 1.7) + ((P.cr ? 1.15 : 1.7) - (P.h || 1.7)) * f;   // カメラ：しゃがみ・歩行の揺れ・ダッシュ時の視野拡大・被弾シェイク
+  bob += vel * dt * 1.7; shake = Math.max(0, shake - dt); const am = Math.min(1, vel / 5);
+  cam.position.set(P.x + (Math.random() - .5) * shake * .15, P.h + Math.sin(bob) * .045 * am + (Math.random() - .5) * shake * .1, P.z);
+  cam.rotation.set(P.pitch, P.yaw, Math.sin(bob * .5) * .008 * am, 'YXZ');
+  const tf = set.fov + (vel > 7 ? 8 : 0); if (Math.abs(cam.fov - tf) > .05) { cam.fov += (tf - cam.fov) * .1; cam.updateProjectionMatrix(); }
   R.render(sc, cam);
 })(performance.now());
 </script></body></html>
